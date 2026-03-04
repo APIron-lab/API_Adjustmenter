@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 from .errors import AppError
 from .models import TransformRules, CastType
@@ -112,9 +112,54 @@ def _flatten(obj: Any, flatten_rules: Dict[str, str]) -> Any:
     return out
 
 
+def _apply_pick(obj: Any, picks: List[str]) -> Any:
+    """
+    picks に指定された dot-path のみを残す。
+    - picks が空なら何もしない
+    - MVP: array index を含むパスは再構築が難しいため安全に無視
+    """
+    if not picks:
+        return obj
+    if not is_dict(obj):
+        raise AppError(
+            code="PICK_NOT_SUPPORTED",
+            message="pick is supported only for JSON objects.",
+            details={"type": type(obj).__name__},
+        )
+
+    out: Dict[str, Any] = {}
+    for path in picks:
+        val = get_path(obj, path)
+        if val is None:
+            continue
+        if "[" in path or "]" in path:
+            continue
+        set_path(out, path, val)
+    return out
+
+
+def _apply_omit(obj: Any, omits: List[str]) -> Any:
+    """
+    omits に指定された dot-path を削除する。
+    - omits が空なら何もしない
+    - MVP: array index を含むパスは安全に無視
+    """
+    if not omits:
+        return obj
+    if not is_dict(obj):
+        return obj
+
+    out = obj
+    for path in omits:
+        if "[" in path or "]" in path:
+            continue
+        out = del_path(out, path)
+    return out
+
+
 def transform_payload(input_json: Any, rules: TransformRules) -> Tuple[Any, Dict[str, Any]]:
     obj = deep_copy_json(input_json)
-    applied = []
+    applied: List[str] = []
 
     if rules.rename:
         obj = _rename_keys(obj, rules.rename)
@@ -131,6 +176,14 @@ def transform_payload(input_json: Any, rules: TransformRules) -> Tuple[Any, Dict
     if rules.flatten:
         obj = _flatten(obj, rules.flatten)
         applied.append("flatten")
+
+    if rules.pick:
+        obj = _apply_pick(obj, rules.pick)
+        applied.append("pick")
+
+    if rules.omit:
+        obj = _apply_omit(obj, rules.omit)
+        applied.append("omit")
 
     meta = {"applied": applied}
     return obj, meta

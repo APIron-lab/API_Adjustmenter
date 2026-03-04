@@ -60,6 +60,30 @@ def test_transform_rules():
     assert out["profile_country"] == "JP"
 
 
+def test_transform_pick_omit():
+    r = client.post(
+        "/transform",
+        json={
+            "input": {"userId": "12", "profile": {"zip": "1000001", "country": "JP"}, "extra": "x"},
+            "rules": {
+                "rename": {"userId": "user_id"},
+                "cast": {"user_id": "int"},
+                "flatten": {"profile": "profile_"},
+                "pick": ["user_id", "profile_zip", "profile_country", "extra"],
+                "omit": ["extra"],
+            },
+        },
+    )
+    assert r.status_code == 200
+    j = r.json()
+    _assert_meta(j["meta"])
+    out = j["result"]["output"]
+    assert out["user_id"] == 12
+    assert out["profile_zip"] == "1000001"
+    assert out["profile_country"] == "JP"
+    assert "extra" not in out
+
+
 def test_diff_breaking():
     r = client.post(
         "/diff",

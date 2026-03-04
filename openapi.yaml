@@ -132,6 +132,19 @@ paths:
                       profile.zip: string
                     flatten:
                       profile: profile_
+                    pick:
+                      type: array
+                      items:
+                        type: string
+                      default: []
+                      description: Keep only these dot-path fields (applied after other rules).
+                    omit:
+                      type: array
+                      items:
+                        type: string
+                    default: []
+                    description: Remove these dot-path fields (applied after pick).
+
       responses:
         "200":
           description: Transformed payload

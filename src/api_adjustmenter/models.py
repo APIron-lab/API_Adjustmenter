@@ -55,6 +55,14 @@ class TransformRules(BaseModel):
     cast: Dict[str, CastType] = Field(default_factory=dict)
     flatten: Dict[str, str] = Field(default_factory=dict)
 
+    # NEW: keep/remove fields by dot-path (MVP: no array indexing)
+    pick: List[str] = Field(default_factory=list)
+    omit: List[str] = Field(default_factory=list)
+
+    # NEW: keep/remove fields by dot-path (MVP: no array indexing)
+    pick: List[str] = Field(default_factory=list)
+    omit: List[str] = Field(default_factory=list)
+
 
 class TransformRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
