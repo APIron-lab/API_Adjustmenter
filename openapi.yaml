@@ -1,0 +1,451 @@
+openapi: 3.0.3
+info:
+  title: API Adjustmenter
+  version: 0.2.0
+  description: >
+    Adjust messy JSON into a stable contract.
+    This API normalizes and transforms JSON responses, and detects schema drift.
+    Response format follows APIron common response spec: {result, meta} / {error, meta}.
+  license:
+    name: MIT
+servers:
+  - url: http://127.0.0.1:8000
+    description: Local development server
+
+tags:
+  - name: Adjustment
+    description: Normalize/Transform/Diff for JSON payloads
+  - name: Health
+    description: Health check
+
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Health check
+      operationId: healthz
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+              examples:
+                ok:
+                  value:
+                    result:
+                      service: api-adjustmenter
+                    meta:
+                      execution_ms: 1
+                      input_length: 0
+                      request_id: "3b6a3b4c-1c4f-4b6a-9aa2-0d4fb4f14f6e"
+
+  /normalize:
+    post:
+      tags: [Adjustment]
+      summary: Normalize JSON payload (key style, number/date coercion, empty-to-null)
+      operationId: normalize
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NormalizeRequest"
+            examples:
+              sample:
+                value:
+                  input:
+                    userId: "12"
+                    created_at: 1700000000
+                    name: ""
+                  options:
+                    key_style: snake
+                    coerce_numbers: true
+                    empty_to_null: true
+                    date_to_iso: true
+      responses:
+        "200":
+          description: Normalized payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NormalizeResponse"
+              examples:
+                ok:
+                  value:
+                    result:
+                      output:
+                        user_id: 12
+                        created_at: "2023-11-14T22:13:20Z"
+                        name: null
+                      adjustment:
+                        key_style: snake
+                        changes: 3
+                        options:
+                          key_style: snake
+                          coerce_numbers: true
+                          empty_to_null: true
+                          date_to_iso: true
+                    meta:
+                      execution_ms: 3
+                      input_length: 123
+                      request_id: "f4b2cf66-2c1f-4d6f-a8f1-7b6c8e0a9a1d"
+        "400":
+          description: Bad request (validation/cast failure)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /transform:
+    post:
+      tags: [Adjustment]
+      summary: Transform JSON payload with rules (rename/defaults/cast/flatten)
+      operationId: transform
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransformRequest"
+            examples:
+              sample:
+                value:
+                  input:
+                    userId: "12"
+                    profile:
+                      zip: "1000001"
+                  rules:
+                    rename:
+                      userId: user_id
+                    defaults:
+                      profile.country: JP
+                    cast:
+                      user_id: int
+                      profile.zip: string
+                    flatten:
+                      profile: profile_
+      responses:
+        "200":
+          description: Transformed payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransformResponse"
+              examples:
+                ok:
+                  value:
+                    result:
+                      output:
+                        user_id: 12
+                        profile_zip: "1000001"
+                        profile_country: "JP"
+                      adjustment:
+                        applied: ["rename", "defaults", "cast", "flatten"]
+                    meta:
+                      execution_ms: 2
+                      input_length: 222
+                      request_id: "b1a5d37d-7a2b-4f1d-a9df-9a5b5d6e2a1c"
+        "400":
+          description: Bad request (validation/cast failure)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /diff:
+    post:
+      tags: [Adjustment]
+      summary: Detect schema drift between two JSON payloads (breaking change detection)
+      operationId: diff
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DiffRequest"
+            examples:
+              sample:
+                value:
+                  before:
+                    id: 1
+                    name: a
+                    tags: [x]
+                  after:
+                    id: "1"
+                    full_name: a
+                    tags: x
+      responses:
+        "200":
+          description: Diff result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiffResponse"
+              examples:
+                ok:
+                  value:
+                    result:
+                      diff:
+                        breaking: true
+                        diff:
+                          removed_keys: ["name"]
+                          added_keys: ["full_name"]
+                          type_changes:
+                            - path: id
+                              from: number
+                              to: string
+                            - path: tags
+                              from: array
+                              to: string
+                      adjustment:
+                        before_paths: 4
+                        after_paths: 4
+                        removed: 1
+                        added: 1
+                        type_changes: 2
+                    meta:
+                      execution_ms: 2
+                      input_length: 200
+                      request_id: "d6f4db2a-6f8e-4c56-9fb1-4a1b1e6d6aa1"
+        "400":
+          description: Bad request (validation failure)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    Meta:
+      type: object
+      required: [execution_ms, input_length, request_id]
+      properties:
+        execution_ms:
+          type: integer
+          minimum: 0
+          description: Execution time in milliseconds.
+        input_length:
+          type: integer
+          minimum: 0
+          description: Request body length in bytes.
+        request_id:
+          type: string
+          description: Request ID for traceability.
+      additionalProperties: false
+
+    ErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        hint:
+          type: string
+          nullable: true
+      additionalProperties: false
+
+    SuccessResponse:
+      type: object
+      required: [result, meta]
+      properties:
+        result: {}
+        meta:
+          $ref: "#/components/schemas/Meta"
+      additionalProperties: false
+
+    ErrorResponse:
+      type: object
+      required: [error, meta]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorBody"
+        meta:
+          $ref: "#/components/schemas/Meta"
+      additionalProperties: false
+
+    NormalizeOptions:
+      type: object
+      properties:
+        key_style:
+          type: string
+          enum: [keep, snake, camel]
+          default: keep
+        coerce_numbers:
+          type: boolean
+          default: false
+        empty_to_null:
+          type: boolean
+          default: false
+        date_to_iso:
+          type: boolean
+          default: false
+      additionalProperties: false
+
+    NormalizeRequest:
+      type: object
+      required: [input]
+      properties:
+        input: {}
+        options:
+          $ref: "#/components/schemas/NormalizeOptions"
+      additionalProperties: false
+
+    CastType:
+      type: string
+      enum: [string, int, float, bool, json]
+
+    TransformRules:
+      type: object
+      properties:
+        rename:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+          description: Map of source path -> destination path.
+        defaults:
+          type: object
+          additionalProperties: true
+          default: {}
+          description: Map of path -> default value (set if missing).
+        cast:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/CastType"
+          default: {}
+          description: Map of path -> cast type.
+        flatten:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+          description: Map of object path -> prefix for lifted keys.
+      additionalProperties: false
+
+    TransformRequest:
+      type: object
+      required: [input, rules]
+      properties:
+        input: {}
+        rules:
+          $ref: "#/components/schemas/TransformRules"
+      additionalProperties: false
+
+    DiffRequest:
+      type: object
+      required: [before, after]
+      properties:
+        before: {}
+        after: {}
+      additionalProperties: false
+
+    TypeChange:
+      type: object
+      required: [path, from, to]
+      properties:
+        path:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+      additionalProperties: false
+
+    DiffResult:
+      type: object
+      required: [removed_keys, added_keys, type_changes]
+      properties:
+        removed_keys:
+          type: array
+          items:
+            type: string
+        added_keys:
+          type: array
+          items:
+            type: string
+        type_changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/TypeChange"
+      additionalProperties: false
+
+    NormalizeResponse:
+      type: object
+      required: [result, meta]
+      properties:
+        result:
+          type: object
+          required: [output, adjustment]
+          properties:
+            output: {}
+            adjustment:
+              type: object
+              additionalProperties: true
+          additionalProperties: false
+        meta:
+          $ref: "#/components/schemas/Meta"
+      additionalProperties: false
+
+    TransformResponse:
+      type: object
+      required: [result, meta]
+      properties:
+        result:
+          type: object
+          required: [output, adjustment]
+          properties:
+            output: {}
+            adjustment:
+              type: object
+              additionalProperties: true
+          additionalProperties: false
+        meta:
+          $ref: "#/components/schemas/Meta"
+      additionalProperties: false
+
+    DiffResponse:
+      type: object
+      required: [result, meta]
+      properties:
+        result:
+          type: object
+          required: [diff, adjustment]
+          properties:
+            diff:
+              type: object
+              required: [breaking, diff]
+              properties:
+                breaking:
+                  type: boolean
+                diff:
+                  $ref: "#/components/schemas/DiffResult"
+              additionalProperties: false
+            adjustment:
+              type: object
+              additionalProperties: true
+          additionalProperties: false
+        meta:
+          $ref: "#/components/schemas/Meta"
+      additionalProperties: false
