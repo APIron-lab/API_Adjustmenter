@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List, Literal, Optional
+from pydantic import BaseModel, Field, ConfigDict
+
+
+Json = Any
+
+
+class ErrorPayload(BaseModel):
+    code: str
+    message: str
+    details: Optional[Dict[str, Any]] = None
+
+
+class OkResponse(BaseModel):
+    ok: Literal[True] = True
+    output: Json
+    meta: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ErrResponse(BaseModel):
+    ok: Literal[False] = False
+    error: ErrorPayload
+
+
+KeyStyle = Literal["keep", "snake", "camel"]
+
+
+class NormalizeOptions(BaseModel):
+    key_style: KeyStyle = "keep"
+    coerce_numbers: bool = False
+    empty_to_null: bool = False
+    date_to_iso: bool = False
+
+
+class NormalizeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    input: Json
+    options: NormalizeOptions = Field(default_factory=NormalizeOptions)
+
+
+CastType = Literal["string", "int", "float", "bool", "json"]
+
+
+class TransformRules(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rename: Dict[str, str] = Field(default_factory=dict)
+    defaults: Dict[str, Any] = Field(default_factory=dict)
+    cast: Dict[str, CastType] = Field(default_factory=dict)
+    flatten: Dict[str, str] = Field(default_factory=dict)
+
+
+class TransformRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    input: Json
+    rules: TransformRules
+
+
+class DiffRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    before: Json
+    after: Json
+
+
+class TypeChange(BaseModel):
+    path: str
+    from_type: str = Field(alias="from")
+    to_type: str = Field(alias="to")
+
+
+class DiffResult(BaseModel):
+    removed_keys: List[str] = Field(default_factory=list)
+    added_keys: List[str] = Field(default_factory=list)
+    type_changes: List[TypeChange] = Field(default_factory=list)
+
+
+class DiffResponse(BaseModel):
+    ok: Literal[True] = True
+    breaking: bool
+    diff: DiffResult
+    meta: Dict[str, Any] = Field(default_factory=dict)
