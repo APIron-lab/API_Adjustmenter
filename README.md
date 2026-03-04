@@ -1,4 +1,3 @@
-````md
 # API Adjustmenter
 
 **API Adjustmenter** adjusts messy JSON into a stable contract.
@@ -72,7 +71,7 @@ OpenAPI spec:
     "request_id": "uuid"
   }
 }
-````
+```
 
 ### Error
 
@@ -291,5 +290,3 @@ Swagger:
 * 機微情報/PIIは送らない運用推奨（必要なら方針を明示）
 
 ---
-
-````
