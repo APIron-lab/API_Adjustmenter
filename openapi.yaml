@@ -117,33 +117,22 @@ paths:
               $ref: "#/components/schemas/TransformRequest"
             examples:
               sample:
-                value:
-                  input:
-                    userId: "12"
-                    profile:
-                      zip: "1000001"
-                  rules:
-                    rename:
-                      userId: user_id
-                    defaults:
-                      profile.country: JP
-                    cast:
-                      user_id: int
-                      profile.zip: string
-                    flatten:
-                      profile: profile_
-                    pick:
-                      type: array
-                      items:
-                        type: string
-                      default: []
-                      description: Keep only these dot-path fields (applied after other rules).
-                    omit:
-                      type: array
-                      items:
-                        type: string
-                    default: []
-                    description: Remove these dot-path fields (applied after pick).
+               value:
+                input:
+                  userId: "12"
+                  profile:
+                    zip: "1000001"
+                    country: "JP"
+                  extra: "x"
+                rules:
+                  rename:
+                    userId: user_id
+                  cast:
+                    user_id: int
+                  flatten:
+                    profile: profile_
+                  pick: ["user_id", "profile_zip", "profile_country", "extra"]
+                  omit: ["extra"]
 
       responses:
         "200":
@@ -355,6 +344,18 @@ components:
             type: string
           default: {}
           description: Map of object path -> prefix for lifted keys.
+        pick:
+          type: array
+          items:
+            type: string
+          default: []
+          description: Keep only these dot-path fields (applied after other rules).
+        omit:
+          type: array
+          items:
+            type: string
+          default: []
+          description: Remove these dot-path fields (applied after pick).
       additionalProperties: false
 
     TransformRequest:

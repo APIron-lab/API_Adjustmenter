@@ -158,12 +158,13 @@ Request:
 curl -s http://127.0.0.1:8000/transform \
   -H "Content-Type: application/json" \
   -d '{
-    "input":{"userId":"12","profile":{"zip":"1000001"}},
+    "input":{"userId":"12","profile":{"zip":"1000001","country":"JP"},"extra":"x"},
     "rules":{
       "rename":{"userId":"user_id"},
-      "defaults":{"profile.country":"JP"},
-      "cast":{"user_id":"int","profile.zip":"string"},
-      "flatten":{"profile":"profile_"}
+      "cast":{"user_id":"int"},
+      "flatten":{"profile":"profile_"},
+      "pick":["user_id","profile_zip","profile_country","extra"],
+      "omit":["extra"]
     }
   }' | jq
 ```
