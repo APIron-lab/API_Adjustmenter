@@ -1,0 +1,16 @@
+README.md
+pyproject.toml
+src/api_adjustmenter/__init__.py
+src/api_adjustmenter/diff.py
+src/api_adjustmenter/errors.py
+src/api_adjustmenter/main.py
+src/api_adjustmenter/models.py
+src/api_adjustmenter/normalize.py
+src/api_adjustmenter/transform.py
+src/api_adjustmenter/util.py
+src/api_adjustmenter.egg-info/PKG-INFO
+src/api_adjustmenter.egg-info/SOURCES.txt
+src/api_adjustmenter.egg-info/dependency_links.txt
+src/api_adjustmenter.egg-info/requires.txt
+src/api_adjustmenter.egg-info/top_level.txt
+tests/test_api.py

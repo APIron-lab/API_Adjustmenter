@@ -5,10 +5,21 @@ from api_adjustmenter.main import app
 
 client = TestClient(app)
 
+
+def _assert_meta(meta: dict):
+    assert "execution_ms" in meta
+    assert "input_length" in meta
+    assert "request_id" in meta
+
+
 def test_healthz():
     r = client.get("/healthz")
     assert r.status_code == 200
-    assert r.json()["ok"] is True
+    j = r.json()
+    assert "result" in j
+    assert "meta" in j
+    _assert_meta(j["meta"])
+
 
 def test_normalize_snake_and_coerce():
     r = client.post(
@@ -20,10 +31,12 @@ def test_normalize_snake_and_coerce():
     )
     assert r.status_code == 200
     j = r.json()
-    assert j["ok"] is True
-    assert j["output"]["user_id"] == 12
-    assert j["output"]["name"] is None
-    assert "T" in j["output"]["created_at"]
+    _assert_meta(j["meta"])
+    out = j["result"]["output"]
+    assert out["user_id"] == 12
+    assert out["name"] is None
+    assert "T" in out["created_at"]
+
 
 def test_transform_rules():
     r = client.post(
@@ -40,10 +53,12 @@ def test_transform_rules():
     )
     assert r.status_code == 200
     j = r.json()
-    assert j["ok"] is True
-    assert j["output"]["user_id"] == 12
-    assert j["output"]["profile_zip"] == "1000001"
-    assert j["output"]["profile_country"] == "JP"
+    _assert_meta(j["meta"])
+    out = j["result"]["output"]
+    assert out["user_id"] == 12
+    assert out["profile_zip"] == "1000001"
+    assert out["profile_country"] == "JP"
+
 
 def test_diff_breaking():
     r = client.post(
@@ -55,6 +70,6 @@ def test_diff_breaking():
     )
     assert r.status_code == 200
     j = r.json()
-    assert j["ok"] is True
-    assert j["breaking"] is True
-    assert len(j["diff"]["type_changes"]) >= 1
+    _assert_meta(j["meta"])
+    assert j["result"]["diff"]["breaking"] is True
+    assert len(j["result"]["diff"]["diff"]["type_changes"]) >= 1

@@ -7,21 +7,26 @@ from pydantic import BaseModel, Field, ConfigDict
 Json = Any
 
 
-class ErrorPayload(BaseModel):
+class Meta(BaseModel):
+    execution_ms: int
+    input_length: int
+    request_id: str
+
+
+class SuccessResponse(BaseModel):
+    result: Json
+    meta: Meta
+
+
+class ErrorBody(BaseModel):
     code: str
     message: str
-    details: Optional[Dict[str, Any]] = None
+    hint: Optional[str] = None
 
 
-class OkResponse(BaseModel):
-    ok: Literal[True] = True
-    output: Json
-    meta: Dict[str, Any] = Field(default_factory=dict)
-
-
-class ErrResponse(BaseModel):
-    ok: Literal[False] = False
-    error: ErrorPayload
+class ErrorResponse(BaseModel):
+    error: ErrorBody
+    meta: Meta
 
 
 KeyStyle = Literal["keep", "snake", "camel"]
@@ -75,8 +80,6 @@ class DiffResult(BaseModel):
     type_changes: List[TypeChange] = Field(default_factory=list)
 
 
-class DiffResponse(BaseModel):
-    ok: Literal[True] = True
+class DiffPayload(BaseModel):
     breaking: bool
     diff: DiffResult
-    meta: Dict[str, Any] = Field(default_factory=dict)

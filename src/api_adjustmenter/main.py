@@ -1,45 +1,124 @@
 from __future__ import annotations
 
+import time
+import uuid
+from typing import Any, Optional
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from .errors import AppError
-from .models import NormalizeRequest, TransformRequest, DiffRequest, OkResponse, ErrResponse, DiffResponse
+from .models import (
+    NormalizeRequest,
+    TransformRequest,
+    DiffRequest,
+    SuccessResponse,
+    ErrorResponse,
+    Meta,
+    DiffPayload,
+)
 from .normalize import normalize_payload
 from .transform import transform_payload
 from .diff import diff_shapes
 
+
 app = FastAPI(
     title="API Adjustmenter",
-    version="0.1.0",
-    description="Adjust messy JSON into a stable contract. Local MVP.",
+    version="0.2.0",
+    description="Adjust messy JSON into a stable contract. APIron common response spec compatible.",
 )
+
+
+def _make_meta(*, start_ns: int, input_length: int, request_id: str) -> Meta:
+    execution_ms = int((time.perf_counter_ns() - start_ns) / 1_000_000)
+    return Meta(execution_ms=execution_ms, input_length=input_length, request_id=request_id)
+
+
+async def _read_body_len(request: Request) -> int:
+    # request.body() は一度読むと保持されるので、後工程に影響しない
+    b = await request.body()
+    return len(b)
+
+
+def _success(result: Any, meta: Meta) -> JSONResponse:
+    payload = SuccessResponse(result=result, meta=meta)
+    return JSONResponse(status_code=200, content=payload.model_dump())
+
+
+def _error(code: str, message: str, hint: Optional[str], meta: Meta, http_status: int) -> JSONResponse:
+    payload = ErrorResponse(error={"code": code, "message": message, "hint": hint}, meta=meta)
+    return JSONResponse(status_code=http_status, content=payload.model_dump())
+
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True, "service": "api-adjustmenter"}
+    # healthz も統一して返す（result/meta）
+    start_ns = time.perf_counter_ns()
+    request_id = str(uuid.uuid4())
+    meta = _make_meta(start_ns=start_ns, input_length=0, request_id=request_id)
+    return SuccessResponse(result={"service": "api-adjustmenter"}, meta=meta)
+
 
 @app.exception_handler(AppError)
-def app_error_handler(request: Request, exc: AppError):
-    payload = ErrResponse(error={"code": exc.code, "message": exc.message, "details": exc.details})
-    return JSONResponse(status_code=exc.http_status, content=payload.model_dump())
+async def app_error_handler(request: Request, exc: AppError):
+    start_ns = request.state.start_ns if hasattr(request.state, "start_ns") else time.perf_counter_ns()
+    request_id = request.state.request_id if hasattr(request.state, "request_id") else str(uuid.uuid4())
+    input_length = request.state.input_length if hasattr(request.state, "input_length") else await _read_body_len(request)
+    meta = _make_meta(start_ns=start_ns, input_length=input_length, request_id=request_id)
+    return _error(exc.code, exc.message, "Check request fields/types and try again.", meta, exc.http_status)
+
 
 @app.exception_handler(Exception)
-def unhandled_error_handler(request: Request, exc: Exception):
-    payload = ErrResponse(error={"code": "INTERNAL_ERROR", "message": "Unhandled server error", "details": {"type": exc.__class__.__name__}})
-    return JSONResponse(status_code=500, content=payload.model_dump())
+async def unhandled_error_handler(request: Request, exc: Exception):
+    start_ns = request.state.start_ns if hasattr(request.state, "start_ns") else time.perf_counter_ns()
+    request_id = request.state.request_id if hasattr(request.state, "request_id") else str(uuid.uuid4())
+    input_length = request.state.input_length if hasattr(request.state, "input_length") else await _read_body_len(request)
+    meta = _make_meta(start_ns=start_ns, input_length=input_length, request_id=request_id)
+    return _error("INTERNAL_ERROR", "Unhandled server error.", "Retry later or contact support.", meta, 500)
 
-@app.post("/normalize", response_model=OkResponse)
-def normalize(req: NormalizeRequest):
-    output, meta = normalize_payload(req.input, req.options)
-    return OkResponse(output=output, meta=meta)
 
-@app.post("/transform", response_model=OkResponse)
-def transform(req: TransformRequest):
-    output, meta = transform_payload(req.input, req.rules)
-    return OkResponse(output=output, meta=meta)
+@app.middleware("http")
+async def add_request_context(request: Request, call_next):
+    request.state.start_ns = time.perf_counter_ns()
+    request.state.request_id = str(uuid.uuid4())
+    request.state.input_length = await _read_body_len(request)
+    return await call_next(request)
 
-@app.post("/diff", response_model=DiffResponse)
-def diff(req: DiffRequest):
-    breaking, diff_result, meta = diff_shapes(req.before, req.after)
-    return DiffResponse(breaking=breaking, diff=diff_result, meta=meta)
+
+@app.post("/normalize")
+async def normalize(request: Request, req: NormalizeRequest):
+    start_ns = request.state.start_ns
+    request_id = request.state.request_id
+    input_length = request.state.input_length
+
+    output, extra_meta = normalize_payload(req.input, req.options)
+    meta = _make_meta(start_ns=start_ns, input_length=input_length, request_id=request_id)
+    # 追加メタは result 側へ寄せる（metaは標準3キーのみ）
+    result = {"output": output, "adjustment": extra_meta}
+    return _success(result, meta)
+
+
+@app.post("/transform")
+async def transform(request: Request, req: TransformRequest):
+    start_ns = request.state.start_ns
+    request_id = request.state.request_id
+    input_length = request.state.input_length
+
+    output, extra_meta = transform_payload(req.input, req.rules)
+    meta = _make_meta(start_ns=start_ns, input_length=input_length, request_id=request_id)
+    result = {"output": output, "adjustment": extra_meta}
+    return _success(result, meta)
+
+
+@app.post("/diff")
+async def diff(request: Request, req: DiffRequest):
+    start_ns = request.state.start_ns
+    request_id = request.state.request_id
+    input_length = request.state.input_length
+
+    breaking, diff_result, extra_meta = diff_shapes(req.before, req.after)
+    meta = _make_meta(start_ns=start_ns, input_length=input_length, request_id=request_id)
+
+    payload = DiffPayload(breaking=breaking, diff=diff_result)
+    result = {"diff": payload.model_dump(by_alias=True), "adjustment": extra_meta}
+    return _success(result, meta)
