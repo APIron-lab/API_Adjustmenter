@@ -1,11 +1,14 @@
 openapi: 3.0.3
 info:
   title: API Adjustmenter
-  version: 0.2.0
+  version: 0.3.0
   description: >
     Adjust messy JSON into a stable contract.
-    This API normalizes and transforms JSON responses, and detects schema drift.
-    Response format follows APIron common response spec: {result, meta} / {error, meta}.
+    This API normalizes and transforms JSON responses, detects schema drift,
+    and supports reusable transform presets via Rulesets (ruleset_id).
+
+    Response format follows APIron common response spec:
+    Success: {result, meta} / Error: {error, meta}.
   license:
     name: MIT
 servers:
@@ -15,6 +18,8 @@ servers:
 tags:
   - name: Adjustment
     description: Normalize/Transform/Diff for JSON payloads
+  - name: Rulesets
+    description: Store/reuse transform rules by ruleset_id
   - name: Health
     description: Health check
 
@@ -71,26 +76,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/NormalizeResponse"
-              examples:
-                ok:
-                  value:
-                    result:
-                      output:
-                        user_id: 12
-                        created_at: "2023-11-14T22:13:20Z"
-                        name: null
-                      adjustment:
-                        key_style: snake
-                        changes: 3
-                        options:
-                          key_style: snake
-                          coerce_numbers: true
-                          empty_to_null: true
-                          date_to_iso: true
-                    meta:
-                      execution_ms: 3
-                      input_length: 123
-                      request_id: "f4b2cf66-2c1f-4d6f-a8f1-7b6c8e0a9a1d"
         "400":
           description: Bad request (validation/cast failure)
           content:
@@ -107,7 +92,7 @@ paths:
   /transform:
     post:
       tags: [Adjustment]
-      summary: Transform JSON payload with rules (rename/defaults/cast/flatten)
+      summary: Transform JSON payload with rules or ruleset_id (rename/defaults/cast/flatten/pick/omit)
       operationId: transform
       requestBody:
         required: true
@@ -116,24 +101,45 @@ paths:
             schema:
               $ref: "#/components/schemas/TransformRequest"
             examples:
-              sample:
-               value:
-                input:
-                  userId: "12"
-                  profile:
-                    zip: "1000001"
-                    country: "JP"
-                  extra: "x"
-                rules:
-                  rename:
-                    userId: user_id
-                  cast:
-                    user_id: int
-                  flatten:
-                    profile: profile_
-                  pick: ["user_id", "profile_zip", "profile_country", "extra"]
-                  omit: ["extra"]
-
+              with_rules_inline:
+                summary: Inline rules (one-off)
+                value:
+                  input:
+                    userId: "12"
+                    profile:
+                      zip: "1000001"
+                      country: "JP"
+                    extra: "x"
+                  rules:
+                    rename:
+                      userId: user_id
+                    cast:
+                      user_id: int
+                    flatten:
+                      profile: profile_
+                    pick: ["user_id", "profile_zip", "profile_country", "extra"]
+                    omit: ["extra"]
+              with_ruleset_id:
+                summary: Use saved ruleset_id (recommended)
+                value:
+                  input:
+                    userId: "12"
+                    profile:
+                      zip: "1000001"
+                      country: "JP"
+                  ruleset_id: "0185863b-0244-49bd-a899-b99afec32654"
+              with_ruleset_override:
+                summary: ruleset_id + override_rules (patch)
+                value:
+                  input:
+                    userId: "12"
+                    profile:
+                      zip: "1000001"
+                      country: "JP"
+                    extra: "x"
+                  ruleset_id: "0185863b-0244-49bd-a899-b99afec32654"
+                  override_rules:
+                    omit: ["extra"]
       responses:
         "200":
           description: Transformed payload
@@ -141,22 +147,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TransformResponse"
-              examples:
-                ok:
-                  value:
-                    result:
-                      output:
-                        user_id: 12
-                        profile_zip: "1000001"
-                        profile_country: "JP"
-                      adjustment:
-                        applied: ["rename", "defaults", "cast", "flatten"]
-                    meta:
-                      execution_ms: 2
-                      input_length: 222
-                      request_id: "b1a5d37d-7a2b-4f1d-a9df-9a5b5d6e2a1c"
         "400":
           description: Bad request (validation/cast failure)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: ruleset_id not found
           content:
             application/json:
               schema:
@@ -179,17 +177,6 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/DiffRequest"
-            examples:
-              sample:
-                value:
-                  before:
-                    id: 1
-                    name: a
-                    tags: [x]
-                  after:
-                    id: "1"
-                    full_name: a
-                    tags: x
       responses:
         "200":
           description: Diff result
@@ -197,32 +184,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DiffResponse"
-              examples:
-                ok:
-                  value:
-                    result:
-                      diff:
-                        breaking: true
-                        diff:
-                          removed_keys: ["name"]
-                          added_keys: ["full_name"]
-                          type_changes:
-                            - path: id
-                              from: number
-                              to: string
-                            - path: tags
-                              from: array
-                              to: string
-                      adjustment:
-                        before_paths: 4
-                        after_paths: 4
-                        removed: 1
-                        added: 1
-                        type_changes: 2
-                    meta:
-                      execution_ms: 2
-                      input_length: 200
-                      request_id: "d6f4db2a-6f8e-4c56-9fb1-4a1b1e6d6aa1"
         "400":
           description: Bad request (validation failure)
           content:
@@ -231,6 +192,119 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /rulesets:
+    get:
+      tags: [Rulesets]
+      summary: List rulesets (lightweight)
+      operationId: listRulesets
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+          description: Max number of items
+      responses:
+        "200":
+          description: List of rulesets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RulesetListResponse"
+    post:
+      tags: [Rulesets]
+      summary: Create ruleset preset (returns ruleset_id)
+      operationId: createRuleset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RulesetCreateRequest"
+            examples:
+              sample:
+                value:
+                  name: my-default
+                  ttl_seconds: null
+                  rules:
+                    rename:
+                      userId: user_id
+                    cast:
+                      user_id: int
+                    flatten:
+                      profile: profile_
+                    pick: ["user_id", "profile_zip", "profile_country"]
+                    omit: []
+      responses:
+        "200":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RulesetCreateResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /rulesets/{ruleset_id}:
+    get:
+      tags: [Rulesets]
+      summary: Get ruleset by id
+      operationId: getRuleset
+      parameters:
+        - in: path
+          name: ruleset_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ruleset details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RulesetGetResponseEnvelope"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags: [Rulesets]
+      summary: Delete ruleset by id
+      operationId: deleteRuleset
+      parameters:
+        - in: path
+          name: ruleset_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RulesetDeleteResponse"
+        "404":
+          description: Not found
           content:
             application/json:
               schema:
@@ -360,12 +434,20 @@ components:
 
     TransformRequest:
       type: object
-      required: [input, rules]
+      required: [input]
       properties:
         input: {}
         rules:
           $ref: "#/components/schemas/TransformRules"
+        ruleset_id:
+          type: string
+          description: Use saved ruleset preset (recommended).
+        override_rules:
+          $ref: "#/components/schemas/TransformRules"
       additionalProperties: false
+      description: >
+        Provide either `rules` or `ruleset_id`. When both are provided, `ruleset_id` takes precedence.
+        `override_rules` is applied only when `ruleset_id` is provided.
 
     DiffRequest:
       type: object
@@ -459,6 +541,120 @@ components:
             adjustment:
               type: object
               additionalProperties: true
+          additionalProperties: false
+        meta:
+          $ref: "#/components/schemas/Meta"
+      additionalProperties: false
+
+    RulesetCreateRequest:
+      type: object
+      required: [name, rules]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        rules:
+          $ref: "#/components/schemas/TransformRules"
+        ttl_seconds:
+          type: integer
+          nullable: true
+          description: TTL seconds. null=default. 0 or negative=never expire.
+      additionalProperties: false
+
+    RulesetCreateResponse:
+      type: object
+      required: [result, meta]
+      properties:
+        result:
+          type: object
+          required: [ruleset_id, name]
+          properties:
+            ruleset_id:
+              type: string
+            name:
+              type: string
+            expires_at:
+              type: number
+              nullable: true
+          additionalProperties: false
+        meta:
+          $ref: "#/components/schemas/Meta"
+      additionalProperties: false
+
+    RulesetSummary:
+      type: object
+      required: [ruleset_id, name, updated_at]
+      properties:
+        ruleset_id:
+          type: string
+        name:
+          type: string
+        updated_at:
+          type: number
+        expires_at:
+          type: number
+          nullable: true
+      additionalProperties: false
+
+    RulesetListResponse:
+      type: object
+      required: [result, meta]
+      properties:
+        result:
+          type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/RulesetSummary"
+          additionalProperties: false
+        meta:
+          $ref: "#/components/schemas/Meta"
+      additionalProperties: false
+
+    RulesetGetResponse:
+      type: object
+      required: [ruleset_id, name, rules, created_at, updated_at]
+      properties:
+        ruleset_id:
+          type: string
+        name:
+          type: string
+        rules:
+          $ref: "#/components/schemas/TransformRules"
+        created_at:
+          type: number
+        updated_at:
+          type: number
+        expires_at:
+          type: number
+          nullable: true
+      additionalProperties: false
+
+    RulesetGetResponseEnvelope:
+      type: object
+      required: [result, meta]
+      properties:
+        result:
+          $ref: "#/components/schemas/RulesetGetResponse"
+        meta:
+          $ref: "#/components/schemas/Meta"
+      additionalProperties: false
+
+    RulesetDeleteResponse:
+      type: object
+      required: [result, meta]
+      properties:
+        result:
+          type: object
+          required: [deleted, ruleset_id]
+          properties:
+            deleted:
+              type: boolean
+            ruleset_id:
+              type: string
           additionalProperties: false
         meta:
           $ref: "#/components/schemas/Meta"
