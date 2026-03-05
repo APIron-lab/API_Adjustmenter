@@ -167,7 +167,7 @@ curl -s http://127.0.0.1:8000/rulesets \
       "omit":[]
     }
   }' | jq
-````
+```
 
 ### 2) Use `ruleset_id` in `/transform`
 
