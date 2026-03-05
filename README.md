@@ -149,6 +149,63 @@ Response (shape):
   "meta": { "execution_ms": 3, "input_length": 123, "request_id": "..." }
 }
 ```
+## Rulesets (Reusable Presets)
+
+Rulesets let you store transform rules once and reuse them by `ruleset_id`.
+
+### 1) Create a ruleset
+```bash
+curl -s http://127.0.0.1:8000/rulesets \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name":"my-default",
+    "rules":{
+      "rename":{"userId":"user_id"},
+      "cast":{"user_id":"int"},
+      "flatten":{"profile":"profile_"},
+      "pick":["user_id","profile_zip","profile_country"],
+      "omit":[]
+    }
+  }' | jq
+````
+
+### 2) Use `ruleset_id` in `/transform`
+
+> Tip: store the id in a shell variable to avoid copy mistakes.
+
+```bash
+RULESET_ID="<paste_ruleset_id_here>"
+
+curl -s http://127.0.0.1:8000/transform \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input":{"userId":"12","profile":{"zip":"1000001","country":"JP"}},
+    "ruleset_id":"'"$RULESET_ID"'"
+  }' | jq
+```
+
+### 3) Patch with `override_rules` (optional)
+
+```bash
+RULESET_ID="<paste_ruleset_id_here>"
+
+curl -s http://127.0.0.1:8000/transform \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input":{"userId":"12","profile":{"zip":"1000001","country":"JP"},"extra":"x"},
+    "ruleset_id":"'"$RULESET_ID"'",
+    "override_rules":{"omit":["extra"]}
+  }' | jq
+```
+
+### 4) List / Get / Delete rulesets
+
+```bash
+curl -s "http://127.0.0.1:8000/rulesets?limit=50" | jq
+curl -s "http://127.0.0.1:8000/rulesets/<ruleset_id>" | jq
+curl -s -X DELETE "http://127.0.0.1:8000/rulesets/<ruleset_id>" | jq
+```
+
 
 ### 2) Transform
 
@@ -225,14 +282,64 @@ Recommended (example):
 * **Transform**：ルールに従って整形（rename/default/cast/flatten）
 * **Diff**：レスポンス形状の差分検知（破壊的変更の検出）
 
-✅ レスポンスは **APIron共通レスポンス仕様** に準拠：
+Rulesetsは、整形ルールを保存して `ruleset_id` で何度でも再利用できる機能です。
 
-* 成功：`{"result": ..., "meta": {...}}`
-* 失敗：`{"error": {...}, "meta": {...}}`
+### 1) ruleset作成
 
+```bash
+curl -s http://127.0.0.1:8000/rulesets \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name":"my-default",
+    "rules":{
+      "rename":{"userId":"user_id"},
+      "cast":{"user_id":"int"},
+      "flatten":{"profile":"profile_"},
+      "pick":["user_id","profile_zip","profile_country"],
+      "omit":[]
+    }
+  }' | jq
+```
+
+### 2) `/transform` で ruleset_id を使う
+
+> コピーミス防止のため、変数に入れるのがおすすめです。
+
+```bash
+RULESET_ID="<ruleset_idを貼り付け>"
+
+curl -s http://127.0.0.1:8000/transform \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input":{"userId":"12","profile":{"zip":"1000001","country":"JP"}},
+    "ruleset_id":"'"$RULESET_ID"'"
+  }' | jq
+```
+
+### 3) override_rules で一時上書き（任意）
+
+```bash
+RULESET_ID="<ruleset_idを貼り付け>"
+
+curl -s http://127.0.0.1:8000/transform \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input":{"userId":"12","profile":{"zip":"1000001","country":"JP"},"extra":"x"},
+    "ruleset_id":"'"$RULESET_ID"'",
+    "override_rules":{"omit":["extra"]}
+  }' | jq
+```
+
+### 4) 一覧 / 取得 / 削除
+
+```bash
+curl -s "http://127.0.0.1:8000/rulesets?limit=50" | jq
+curl -s "http://127.0.0.1:8000/rulesets/<ruleset_id>" | jq
+curl -s -X DELETE "http://127.0.0.1:8000/rulesets/<ruleset_id>" | jq
+```
 ---
 
-## RapidAPIで刺さるポイント
+## 使用用途
 
 「死活監視」ではなく、**“レスポンスが安定して使えるか”** を扱います。
 
