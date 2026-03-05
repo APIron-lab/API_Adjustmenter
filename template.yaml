@@ -1,0 +1,48 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: API Adjustmenter - FastAPI (Mangum) on AWS Lambda, published via HTTP API.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 15
+    MemorySize: 512
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        API_ADJ_RULESET_PERSIST: "0"
+        API_ADJ_RULESET_TTL_SECONDS: "604800"
+
+Resources:
+  ApiAdjustmenterHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowHeaders:
+          - "*"
+        AllowMethods:
+          - GET
+          - POST
+          - DELETE
+          - OPTIONS
+
+  ApiAdjustmenterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: handler.handler
+      Events:
+        Root:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiAdjustmenterHttpApi
+            Path: /{proxy+}
+            Method: ANY
+
+Outputs:
+  HttpApiUrl:
+    Description: "HTTP API endpoint base URL"
+    Value: !Sub "https://${ApiAdjustmenterHttpApi}.execute-api.${AWS::Region}.amazonaws.com"

@@ -12,9 +12,8 @@ info:
   license:
     name: MIT
 servers:
-  - url: http://127.0.0.1:8000
-    description: Local development server
-
+  - url: https://87zbiu7xx1.execute-api.ap-northeast-1.amazonaws.com
+    description: Production (AWS Lambda + HTTP API)
 tags:
   - name: Adjustment
     description: Normalize/Transform/Diff for JSON payloads
