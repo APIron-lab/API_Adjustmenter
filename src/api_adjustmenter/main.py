@@ -16,17 +16,24 @@ from .models import (
     ErrorResponse,
     Meta,
     DiffPayload,
+    RulesetCreateRequest,
+    RulesetGetResponse,
+    RulesetSummary,
+    TransformRules,
 )
 from .normalize import normalize_payload
 from .transform import transform_payload
 from .diff import diff_shapes
+from .rulesets import default_ruleset_store
 
 
 app = FastAPI(
     title="API Adjustmenter",
-    version="0.2.0",
-    description="Adjust messy JSON into a stable contract. APIron common response spec compatible.",
+    version="0.3.0",
+    description="Adjust messy JSON into a stable contract. Includes ruleset presets (ruleset_id).",
 )
+
+RULESETS = default_ruleset_store()
 
 
 def _make_meta(*, start_ns: int, input_length: int, request_id: str) -> Meta:
@@ -35,7 +42,6 @@ def _make_meta(*, start_ns: int, input_length: int, request_id: str) -> Meta:
 
 
 async def _read_body_len(request: Request) -> int:
-    # request.body() は一度読むと保持されるので、後工程に影響しない
     b = await request.body()
     return len(b)
 
@@ -52,7 +58,6 @@ def _error(code: str, message: str, hint: Optional[str], meta: Meta, http_status
 
 @app.get("/healthz")
 def healthz():
-    # healthz も統一して返す（result/meta）
     start_ns = time.perf_counter_ns()
     request_id = str(uuid.uuid4())
     meta = _make_meta(start_ns=start_ns, input_length=0, request_id=request_id)
@@ -65,6 +70,7 @@ async def app_error_handler(request: Request, exc: AppError):
     request_id = request.state.request_id if hasattr(request.state, "request_id") else str(uuid.uuid4())
     input_length = request.state.input_length if hasattr(request.state, "input_length") else await _read_body_len(request)
     meta = _make_meta(start_ns=start_ns, input_length=input_length, request_id=request_id)
+    # hint は英語（APIron標準）
     return _error(exc.code, exc.message, "Check request fields/types and try again.", meta, exc.http_status)
 
 
@@ -74,7 +80,7 @@ async def unhandled_error_handler(request: Request, exc: Exception):
     request_id = request.state.request_id if hasattr(request.state, "request_id") else str(uuid.uuid4())
     input_length = request.state.input_length if hasattr(request.state, "input_length") else await _read_body_len(request)
     meta = _make_meta(start_ns=start_ns, input_length=input_length, request_id=request_id)
-    return _error("INTERNAL_ERROR", "Unhandled server error.", "Retry later or contact support.", meta, 500)
+    return _error("INTERNAL_ERROR", "サーバ内部で予期しないエラーが発生しました。", "Retry later or contact support.", meta, 500)
 
 
 @app.middleware("http")
@@ -93,7 +99,6 @@ async def normalize(request: Request, req: NormalizeRequest):
 
     output, extra_meta = normalize_payload(req.input, req.options)
     meta = _make_meta(start_ns=start_ns, input_length=input_length, request_id=request_id)
-    # 追加メタは result 側へ寄せる（metaは標準3キーのみ）
     result = {"output": output, "adjustment": extra_meta}
     return _success(result, meta)
 
@@ -104,7 +109,22 @@ async def transform(request: Request, req: TransformRequest):
     request_id = request.state.request_id
     input_length = request.state.input_length
 
-    output, extra_meta = transform_payload(req.input, req.rules)
+    # Resolve rules
+    rules: Optional[TransformRules] = None
+
+    if req.ruleset_id:
+        rules = RULESETS.resolve_rules(ruleset_id=req.ruleset_id, override_rules=req.override_rules)
+    elif req.rules:
+        rules = req.rules
+    else:
+        raise AppError(
+            code="MISSING_FIELD",
+            message="rules または ruleset_id のいずれかが必要です。",
+            details={"required_one_of": ["rules", "ruleset_id"]},
+            http_status=400,
+        )
+
+    output, extra_meta = transform_payload(req.input, rules)
     meta = _make_meta(start_ns=start_ns, input_length=input_length, request_id=request_id)
     result = {"output": output, "adjustment": extra_meta}
     return _success(result, meta)
@@ -122,3 +142,71 @@ async def diff(request: Request, req: DiffRequest):
     payload = DiffPayload(breaking=breaking, diff=diff_result)
     result = {"diff": payload.model_dump(by_alias=True), "adjustment": extra_meta}
     return _success(result, meta)
+
+
+# ---- Ruleset endpoints ----
+
+@app.post("/rulesets")
+async def create_ruleset(request: Request, req: RulesetCreateRequest):
+    start_ns = request.state.start_ns
+    request_id = request.state.request_id
+    input_length = request.state.input_length
+
+    rec = RULESETS.create(name=req.name, rules=req.rules, ttl_seconds=req.ttl_seconds)
+    meta = _make_meta(start_ns=start_ns, input_length=input_length, request_id=request_id)
+    result = {"ruleset_id": rec.ruleset_id, "name": rec.name, "expires_at": rec.expires_at}
+    return _success(result, meta)
+
+
+@app.get("/rulesets/{ruleset_id}")
+async def get_ruleset(request: Request, ruleset_id: str):
+    start_ns = request.state.start_ns
+    request_id = request.state.request_id
+    input_length = request.state.input_length
+
+    rec = RULESETS.get(ruleset_id)
+    meta = _make_meta(start_ns=start_ns, input_length=input_length, request_id=request_id)
+
+    result = RulesetGetResponse(
+        ruleset_id=rec.ruleset_id,
+        name=rec.name,
+        rules=TransformRules(**rec.rules),
+        created_at=rec.created_at,
+        updated_at=rec.updated_at,
+        expires_at=rec.expires_at,
+    ).model_dump()
+    return _success(result, meta)
+
+
+@app.get("/rulesets")
+async def list_rulesets(request: Request, limit: int = 50):
+    start_ns = request.state.start_ns
+    request_id = request.state.request_id
+    input_length = request.state.input_length
+
+    items = RULESETS.list(limit=limit)
+    meta = _make_meta(start_ns=start_ns, input_length=input_length, request_id=request_id)
+
+    result = {
+        "items": [
+            RulesetSummary(
+                ruleset_id=r.ruleset_id,
+                name=r.name,
+                updated_at=r.updated_at,
+                expires_at=r.expires_at,
+            ).model_dump()
+            for r in items
+        ]
+    }
+    return _success(result, meta)
+
+
+@app.delete("/rulesets/{ruleset_id}")
+async def delete_ruleset(request: Request, ruleset_id: str):
+    start_ns = request.state.start_ns
+    request_id = request.state.request_id
+    input_length = request.state.input_length
+
+    RULESETS.delete(ruleset_id)
+    meta = _make_meta(start_ns=start_ns, input_length=input_length, request_id=request_id)
+    return _success({"deleted": True, "ruleset_id": ruleset_id}, meta)

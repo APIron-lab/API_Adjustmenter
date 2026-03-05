@@ -55,19 +55,21 @@ class TransformRules(BaseModel):
     cast: Dict[str, CastType] = Field(default_factory=dict)
     flatten: Dict[str, str] = Field(default_factory=dict)
 
-    # NEW: keep/remove fields by dot-path (MVP: no array indexing)
-    pick: List[str] = Field(default_factory=list)
-    omit: List[str] = Field(default_factory=list)
-
-    # NEW: keep/remove fields by dot-path (MVP: no array indexing)
     pick: List[str] = Field(default_factory=list)
     omit: List[str] = Field(default_factory=list)
 
 
 class TransformRequest(BaseModel):
+    """
+    Either:
+      - rules: TransformRules
+      - ruleset_id: str (+ optional override_rules)
+    """
     model_config = ConfigDict(extra="forbid")
     input: Json
-    rules: TransformRules
+    rules: Optional[TransformRules] = None
+    ruleset_id: Optional[str] = None
+    override_rules: Optional[TransformRules] = None
 
 
 class DiffRequest(BaseModel):
@@ -91,3 +93,28 @@ class DiffResult(BaseModel):
 class DiffPayload(BaseModel):
     breaking: bool
     diff: DiffResult
+
+
+# ---- Ruleset APIs ----
+
+class RulesetCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=80)
+    rules: TransformRules
+    ttl_seconds: Optional[int] = Field(default=None, description="TTL in seconds. null=default. 0 or negative=never expire.")
+
+
+class RulesetSummary(BaseModel):
+    ruleset_id: str
+    name: str
+    updated_at: float
+    expires_at: Optional[float] = None
+
+
+class RulesetGetResponse(BaseModel):
+    ruleset_id: str
+    name: str
+    rules: TransformRules
+    created_at: float
+    updated_at: float
+    expires_at: Optional[float] = None
