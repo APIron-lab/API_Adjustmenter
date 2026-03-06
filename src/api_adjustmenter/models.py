@@ -107,14 +107,14 @@ class RulesetCreateRequest(BaseModel):
 class RulesetSummary(BaseModel):
     ruleset_id: str
     name: str
-    updated_at: float
-    expires_at: Optional[float] = None
+    updated_at: int
+    expires_at: Optional[int] = None
 
 
 class RulesetGetResponse(BaseModel):
     ruleset_id: str
     name: str
     rules: TransformRules
-    created_at: float
-    updated_at: float
-    expires_at: Optional[float] = None
+    created_at: int
+    updated_at: int
+    expires_at: Optional[int] = None

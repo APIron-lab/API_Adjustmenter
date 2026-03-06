@@ -171,9 +171,9 @@ async def get_ruleset(request: Request, ruleset_id: str):
         ruleset_id=rec.ruleset_id,
         name=rec.name,
         rules=TransformRules(**rec.rules),
-        created_at=rec.created_at,
-        updated_at=rec.updated_at,
-        expires_at=rec.expires_at,
+        created_at=int(rec.created_at),
+        updated_at=int(rec.updated_at),
+        expires_at=int(rec.expires_at) if rec.expires_at is not None else None,
     ).model_dump()
     return _success(result, meta)
 
